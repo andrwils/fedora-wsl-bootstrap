@@ -8,6 +8,7 @@ if [ ! -f /etc/wsl.conf ]; then
     sudo tee /etc/wsl.conf >/dev/null <<EOF
 [boot]
 systemd=true
+command = mount --make-shared /
 
 [network]
 generateResolvConf=true
