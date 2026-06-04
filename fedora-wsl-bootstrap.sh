@@ -3,8 +3,6 @@ set -euo pipefail
 
 cleanup_tmp_files() {
     [ -n "${WSL_CONF_TMP:-}" ] && rm -f "$WSL_CONF_TMP"
-    [ -n "${TMP_GH_KEYS:-}" ] && rm -f "$TMP_GH_KEYS"
-    [ -n "${TMP_EXISTING_GH_KEYS:-}" ] && rm -f "$TMP_EXISTING_GH_KEYS"
 }
 
 trap cleanup_tmp_files EXIT
@@ -204,36 +202,19 @@ KNOWN_HOSTS="$HOME/.ssh/known_hosts"
 touch "$KNOWN_HOSTS"
 chmod 600 "$KNOWN_HOSTS"
 
-# Verify GitHub's published ED25519 host key fingerprint before trusting scanned keys.
-# Maintenance source: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints
-EXPECTED_GH_ED25519_FP="SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU"
-
-TMP_EXISTING_GH_KEYS="$(mktemp)"
-awk '$1 ~ /^github\.com([, ]|$)/ && $2 == "ssh-ed25519" {print}' "$KNOWN_HOSTS" > "$TMP_EXISTING_GH_KEYS"
-EXISTING_GH_ED25519_FP=""
-if [ -s "$TMP_EXISTING_GH_KEYS" ]; then
-    EXISTING_GH_ED25519_FP="$(ssh-keygen -lf "$TMP_EXISTING_GH_KEYS" -E sha256 | awk 'NR == 1 {print $2}')"
-fi
-
-if [ "$EXISTING_GH_ED25519_FP" != "$EXPECTED_GH_ED25519_FP" ]; then
-    echo "Refreshing GitHub SSH host keys via ssh-keyscan"
-
-    # Remove existing github.com entries before writing validated keys.
+# Static keys from https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints
+# Update these if GitHub rotates their host keys (rare, always announced by GitHub).
+if ! grep -qF "AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" "$KNOWN_HOSTS"; then
+    echo "Adding GitHub SSH host keys (static, from GitHub docs)"
+    # Remove any existing github.com entries first to avoid duplicates or stale keys.
     ssh-keygen -R github.com -f "$KNOWN_HOSTS" >/dev/null 2>&1 || true
-
-    TMP_GH_KEYS="$(mktemp)"
-    ssh-keyscan github.com 2>/dev/null > "$TMP_GH_KEYS"
-
-    ACTUAL_GH_ED25519_FP="$(ssh-keygen -lf "$TMP_GH_KEYS" -E sha256 | awk '$4 == "(ED25519)" {print $2; exit}')"
-
-    if [ "$ACTUAL_GH_ED25519_FP" != "$EXPECTED_GH_ED25519_FP" ]; then
-        echo "ERROR: GitHub ED25519 host key fingerprint mismatch; update EXPECTED_GH_ED25519_FP from https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints"
-        exit 1
-    fi
-
-    cat "$TMP_GH_KEYS" >> "$KNOWN_HOSTS"
+    cat >> "$KNOWN_HOSTS" <<'EOF'
+github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=
+github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKCUXaDbC7qtbW8gIkhL7aGCsOr/C56SJMy/BCZfxd1nWzAOxSDPgVsmerOBYfNqltV9/hWCqBywINIR+5dIg6JTJ72pcEpEjcYgXkE2YEFXV1JHnsKgbLWNlhScqb2UmyRkQyytRLtL+38TGxkxCflmO+5Z8CSSNY7GidjMIZ7Q4zMjA2n1nGrlTDkzwDCsw+wqFPGQA179cnfGWOWRVruj16z6XyvxvjJwbz0wQZ75XK5tKSb7FNyeIEs4TT4jk+S4dhPeAUC5y+bDYirYgM4GC7uEnztnZyaVWQ7B381AK4Qdrwt51ZqExKbQpTUNn+EjqoTwvqNj4kqx5QUCI0ThS/YkOxJCXmPUWZbhjpCg56i+2aB6CmK2JGhn57K5mj0MNdBXA4/WnwH6XoPWJzK5Nyu2zB3nAZp+S5hpQs+p1vN1/wsjk=
+EOF
 else
-    echo "GitHub ED25519 host key already validated — skipping refresh"
+    echo "GitHub SSH host keys already present — skipping"
 fi
 
 # Phase 8: User ssh-agent service and shell wiring
