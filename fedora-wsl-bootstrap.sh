@@ -35,6 +35,7 @@ ensure_wsl_conf_key() {
             section_found = 0
             in_section = 0
             key_written = 0
+            key_lc = tolower(key)
         }
         {
             if ($0 ~ /^\[[^]]+\]$/) {
@@ -50,12 +51,19 @@ ensure_wsl_conf_key() {
                 next
             }
 
-            if (in_section && $0 ~ "^[[:space:]]*" key "[[:space:]]*=") {
-                if (!key_written) {
-                    print key "=" value
-                    key_written = 1
+            if (in_section) {
+                eq_index = index($0, "=")
+                if (eq_index > 0) {
+                    current_key = substr($0, 1, eq_index - 1)
+                    gsub(/^[[:space:]]+|[[:space:]]+$/, "", current_key)
+                    if (tolower(current_key) == key_lc) {
+                        if (!key_written) {
+                            print key "=" value
+                            key_written = 1
+                        }
+                        next
+                    }
                 }
-                next
             }
 
             print
@@ -78,11 +86,11 @@ ensure_wsl_conf_key() {
 
 ensure_wsl_conf_key "boot" "systemd" "true" "$WSL_CONF_TMP"
 ensure_wsl_conf_key "boot" "command" "mount --make-shared /" "$WSL_CONF_TMP"
-ensure_wsl_conf_key "network" "generateResolvConf" "true" "$WSL_CONF_TMP"
+ensure_wsl_conf_key "network" "generateresolvconf" "true" "$WSL_CONF_TMP"
 ensure_wsl_conf_key "interop" "enabled" "true" "$WSL_CONF_TMP"
-ensure_wsl_conf_key "interop" "appendWindowsPath" "true" "$WSL_CONF_TMP"
+ensure_wsl_conf_key "interop" "appendwindowspath" "true" "$WSL_CONF_TMP"
 ensure_wsl_conf_key "automount" "enabled" "true" "$WSL_CONF_TMP"
-ensure_wsl_conf_key "automount" "mountFsTab" "true" "$WSL_CONF_TMP"
+ensure_wsl_conf_key "automount" "mountfstab" "true" "$WSL_CONF_TMP"
 ensure_wsl_conf_key "automount" "options" "\"metadata,uid=$(id -u),gid=$(id -g),umask=022,fmask=11,case=off\"" "$WSL_CONF_TMP"
 ensure_wsl_conf_key "user" "default" "$(whoami)" "$WSL_CONF_TMP"
 
@@ -150,7 +158,31 @@ sudo dnf5 -y install \
     ltrace \
     pkgconf-pkg-config
 
-# Phase 6: Container runtimes (Podman + Docker)
+# Phase 6: Platform CLIs (Vault, Helm, JFrog CLI, consul-template)
+echo "=== Installing platform CLIs from official third-party repos ==="
+
+echo "=== Setting up HashiCorp official repository ==="
+if [ ! -f /etc/yum.repos.d/hashicorp.repo ]; then
+    sudo tee /etc/yum.repos.d/hashicorp.repo >/dev/null <<'EOF'
+[hashicorp]
+name=HashiCorp Stable - $basearch
+baseurl=https://rpm.releases.hashicorp.com/fedora/$releasever/$basearch/stable
+enabled=1
+gpgcheck=1
+gpgkey=https://rpm.releases.hashicorp.com/gpg
+repo_gpgcheck=1
+EOF
+fi
+
+sudo dnf5 -y install vault consul-template
+
+echo "=== Installing Helm from official Fedora repository ==="
+sudo dnf5 -y install helm
+
+echo "=== Installing JFrog CLI ==="
+sudo dnf5 -y install jfrog-cli-v2-jf
+
+# Phase 7: Container runtimes (Podman + Docker)
 echo "=== Installing Podman ==="
 sudo dnf5 -y install podman
 
@@ -180,7 +212,7 @@ sudo systemctl enable --now docker || true
 echo "=== Adding user to docker group ==="
 sudo usermod -aG docker "$USER"
 
-# Phase 7: SSH key and GitHub host trust
+# Phase 8: SSH key and GitHub host trust
 echo "=== Setting up SSH key ==="
 
 mkdir -p "$HOME/.ssh"
@@ -217,7 +249,7 @@ else
     echo "GitHub SSH host keys already present — skipping"
 fi
 
-# Phase 8: User ssh-agent service and shell wiring
+# Phase 9: User ssh-agent service and shell wiring
 echo "=== Installing systemd user ssh-agent service ==="
 
 mkdir -p "$HOME/.config/systemd/user"
@@ -267,11 +299,11 @@ if ! grep -q ".bashrc" "$HOME/.bash_profile" 2>/dev/null; then
     echo 'if [ -f ~/.bashrc ]; then . ~/.bashrc; fi' >> ~/.bash_profile
 fi
 
-# Phase 9: Developer workspace directories
+# Phase 10: Developer workspace directories
 echo "=== Creating common directories ==="
 mkdir -p "$HOME/projects" "$HOME/bin"
 
-# Phase 10: Completion summary
+# Phase 11: Completion summary
 echo "=== Bootstrap complete ==="
 echo "Systemd-managed ssh-agent with automatic key loading is enabled."
 echo "You will be prompted once per WSL boot for your SSH key passphrase."
